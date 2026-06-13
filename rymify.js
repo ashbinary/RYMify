@@ -1,5 +1,5 @@
 
-let mutationObserver = null;
+let observer = null;
 let currentRating = 0;
 
 function starsToScore(stars) {
@@ -145,19 +145,15 @@ function submitRating(stars) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
   
   // Trigger click on the Rate button to submit
-  const rateButton = document.querySelector('.insertRating');
-  if (rateButton) {
-    rateButton.click();
-  }
+  const rateButton = document.querySelector('.insertRating, .updateRating');
+
+  rateButton?.click();
   
   console.log('[RYMify] Submitted rating of ', stars, 'stars (', score, 'score)');
-  replaceRatingBlock(); // Update all blocks to reflect new rating
 }
 
 
-function replaceActiveRating() {
-  const control = findRatingControl();
-
+function replaceActiveRating(control) {
   if (!control || control.style.display == 'none')
   {
     return;
@@ -178,31 +174,36 @@ function replaceActiveRating() {
   control.parentNode.insertBefore(starWidget, control.nextSibling);
 }
 
+function replaceRating(block)
+{
+  const rating = block.querySelector('.rating');
+
+  if (!rating) { // rating block doesn't contain a rating
+    console.log('No .rating found in:', block);
+    return;
+  }
+
+  const row = block.parentElement;
+  const text = row.querySelector('.ratingText');
+
+  if (text && 
+      (text.textContent.toLowerCase().includes('critic') || 
+      text.textContent.toLowerCase().includes('user'))) // returns on critic/user score blocks
+  {
+    return;
+  }
+
+  const score = parseInt(rating.textContent, 10);
+
+  block.style.display = 'none';
+  const starWidget = createStarWidgetReadOnly(scoreToStars(score));
+  block.parentNode.insertBefore(starWidget, block.nextSibling);
+}
+
 function replaceRatingBlock()
 {
   document.querySelectorAll('.ratingBlock').forEach(block => {
-    const rating = block.querySelector('.rating');
-
-    if (!rating) { // rating block doesn't contain a rating
-      console.log('No .rating found in:', block);
-      return;
-    }
-
-    const row = block.parentElement;
-    const text = row.querySelector('.ratingText');
-
-    if (text && 
-       (text.textContent.toLowerCase().includes('critic') || 
-        text.textContent.toLowerCase().includes('user'))) // returns on critic/user score blocks
-    {
-      return;
-    }
-
-    const score = parseInt(rating.textContent, 10);
-
-    block.style.display = 'none';
-    const starWidget = createStarWidgetReadOnly(scoreToStars(score));
-    block.parentNode.insertBefore(starWidget, block.nextSibling);
+    replaceRating(block);
   });
 }
 
@@ -218,29 +219,56 @@ function replaceRatingDistribution()
 
 function setupLayout() {
   replaceRatingBlock(); // Replaces all already-rated blocks with stars
-  replaceActiveRating(); // Replaces the unrated area with stars
+  replaceActiveRating(findRatingControl()); // Replaces the unrated area with stars
   replaceRatingDistribution(); // Replaces the rating distribution labels with stars
 }
 
 // The MutationObserver will watch for changes in the DOM to re-inject the star UI
 // Kept but not used because AOTY's page is pretty static and doesn't seem to load new content dynamically, but may be useful in the future 
 function setupMutationObserver() {
-  if (mutationObserver) { return; }
+  if (observer) { return; }
 
-  mutationObserver = new MutationObserver(() => {
-    if (!document.querySelector('[stars="true"].stars')) {
-      replaceActiveRating();
-    }
+  observer = new MutationObserver(() => {
+    document.querySelectorAll('.ratingBlock.yourOwn').forEach(el => {
+      el.remove();
+    });
+    document.querySelectorAll('#ratingBlock #updateValue').forEach(el => {
+      replaceActiveRating(el.parentElement);
+    });
+    // document.querySelectorAll('#ratingBlock .insertRating').forEach(el => {
+    //   const stars = document.querySelector('.stars[stars="true"]');
+    //   stars?.querySelectorAll('.star').forEach(star => {
+    //     star.className = 'star empty';
+    //   });
+    //   replaceActiveRating(el.parentElement);
+    // });
   });
   
-  mutationObserver.observe(document.body, { childList: true, subtree: true });  
+  observer.observe(document.body, { childList: true, subtree: true });  
   console.log('[RYMify] MutationObserver started');
+}
+
+function addListeners() { 
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.deleteRatingYes');
+    if (!btn) return;
+
+    const stars = document.querySelector('.stars[stars="true"]');
+    stars?.querySelectorAll('.star').forEach(star => {
+      star.className = 'star empty';
+    });
+
+    const button = document.querySelector('#ratingBlock .insertRating');
+    if (button) { replaceActiveRating(button); }
+  }, true);
 }
 
 
 function init() {
   console.log('[RYMify] Initializing extension...');
   setupLayout();
+  setupMutationObserver();
+  addListeners();
 }
 
 // Makes sure function runs no matter when in the loading process
