@@ -1,3 +1,10 @@
+/* Native AOTY rating controls we replace with a star widget. Uses a class
+   (not inline style) so AOTY's own display value stays readable as a state
+   signal. */
+.rymify-hide {
+  display: none !important;
+}
+
 /* Star container */
 .stars {
   display: flex;

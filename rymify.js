@@ -1,6 +1,7 @@
-
 let observer = null;
 let currentRating = 0;
+
+// --- Conversion ---
 
 function starsToScore(stars) {
   return Math.round(stars * 20);
@@ -10,268 +11,183 @@ function scoreToStars(score) {
   return score / 20;
 }
 
-function findRatingControl() {
-  // Look for AOTY's actual rating block
-  let container = document.querySelector('#ratingBlock');
-  return container;
-}
+// --- Star widget ---
 
-function findCurrentRatingControl() {
-  // Look for AOTY's actual rating block
-  let container = document.querySelector('#currentRatingBlock');
-  return container;
-}
-
-function findRatingInput() {
-  // Look for AOTY's actual rating value div
-  let input = document.querySelector('.ratingTextBox');
-  return input;
-}
-
-function findCurrentRating() {
-  // Look for AOTY's actual rating value div
-  let input = document.querySelector('.rating');
-  return input;
-}
-
-function readCurrentRating() {
-  const input = findCurrentRating();
-  if (!input) { return 0; }
-  const score = parseInt(input.textContent, 10);
-  return scoreToStars(score);
-}
-
-function createStarWidget(initialStars) {
+function createStarWidget(initialStars, readOnly = false) {
   const widget = document.createElement('div');
   widget.className = 'stars';
   widget.setAttribute('stars', 'true');
-  
-  for (let i = 1; i <= 5; i++) {
+
+  for (let i = 0; i < 5; i++) {
     const star = document.createElement('span');
-    star.className = 'star';
+    star.className = readOnly ? 'star-read-only' : 'star';
     star.textContent = '★';
     widget.appendChild(star);
   }
-  
+
   renderStars(initialStars, widget);
-  attachStarEventListeners(widget);
-  
+  if (!readOnly) attachStarEventListeners(widget);
+
   return widget;
 }
 
-function createStarWidgetReadOnly(initialStars) {
-  const widget = document.createElement('div');
-  widget.className = 'stars';
-  widget.setAttribute('stars', 'true');
-  
-  for (let i = 1; i <= 5; i++) {
-    const star = document.createElement('span');
-    star.className = 'star-read-only';
-    star.textContent = '★';
-    widget.appendChild(star);
-  }
-  
-  renderStars(initialStars, widget);
-  
-  return widget;
-}
+function renderStars(value, widget) {
+  // Guard against NaN / out-of-range so a bad parse never blanks the widget
+  let v = Number(value);
+  if (!Number.isFinite(v)) v = 0;
+  v = Math.max(0, Math.min(5, v));
 
-// Render stars with full, half, and empty states
-function renderStars(value, container) {
-  const stars = container.querySelectorAll('.star, .star-read-only');
-  const fullStars = Math.floor(value);
-  const hasHalf = value % 1 !== 0;
-  
-  stars.forEach((star, index) => {
-    const starNum = index + 1;
+  const stars = widget.querySelectorAll('.star, .star-read-only');
+  const full = Math.floor(v);
+  const hasHalf = v % 1 !== 0;
+
+  stars.forEach((star, i) => {
+    const n = i + 1;
     star.classList.remove('full', 'half', 'empty');
-    
-    if (starNum <= fullStars) {
-      star.classList.add('full');
-    } else if (starNum === fullStars + 1 && hasHalf) {
-      star.classList.add('half');
-    } else {
-      star.classList.add('empty');
-    }
+    if (n <= full) star.classList.add('full');
+    else if (n === full + 1 && hasHalf) star.classList.add('half');
+    else star.classList.add('empty');
   });
-
 }
 
-// Attach event listeners to star widget
-// TBD: Make this function... readable? It's a bit of a mess right now
+function ratingFromEvent(e, widget) {
+  const star = e.target.closest('.star');
+  if (!star) return null;
+  const idx = Array.from(widget.querySelectorAll('.star')).indexOf(star) + 1;
+  const rect = star.getBoundingClientRect();
+  return (e.clientX - rect.left) < rect.width / 2 ? idx - 0.5 : idx;
+}
+
 function attachStarEventListeners(widget) {
   widget.addEventListener('click', (e) => {
-    const star = e.target.closest('.star');
-    if (!star) return;
-    
-    const stars = widget.querySelectorAll('.star');
-    const starIndex = Array.from(stars).indexOf(star) + 1;
-    const rect = star.getBoundingClientRect();
-    const isLeft = (e.clientX - rect.left) < rect.width / 2;
-    
-    currentRating = isLeft ? starIndex - 0.5 : starIndex;
+    const rating = ratingFromEvent(e, widget);
+    if (rating === null) return;
+    currentRating = rating;
     renderStars(currentRating, widget);
     submitRating(currentRating);
   });
-  
+
   widget.addEventListener('mousemove', (e) => {
-    const star = e.target.closest('.star');
-    if (!star) {
-      renderStars(currentRating, widget);
-      return;
-    }
-    
-    const stars = widget.querySelectorAll('.star');
-    const starIndex = Array.from(stars).indexOf(star) + 1;
-    const rect = star.getBoundingClientRect();
-    const isLeft = (e.clientX - rect.left) < rect.width / 2;
-    const hoverRating = isLeft ? starIndex - 0.5 : starIndex;
-    
-    renderStars(hoverRating, widget);
+    const rating = ratingFromEvent(e, widget);
+    renderStars(rating ?? currentRating, widget);
   });
-  
+
   widget.addEventListener('mouseleave', () => {
     renderStars(currentRating, widget);
   });
 }
 
+// --- Rating submission ---
+
 function submitRating(stars) {
-  const input = findRatingInput();
+  const input = document.querySelector('.ratingTextBox');
+  if (!input) {
+    console.warn('[RYMify] Rating input not found; cannot submit');
+    return;
+  }
 
   const score = starsToScore(stars);
   input.value = score;
-  
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
-  
-  // Trigger click on the Rate button to submit
-  const rateButton = document.querySelector('.insertRating, .updateRating');
-
-  rateButton?.click();
-  
-  console.log('[RYMify] Submitted rating of ', stars, 'stars (', score, 'score)');
+  document.querySelector('.insertRating, .updateRating')?.click();
+  console.log('[RYMify] Submitted rating:', stars, 'stars (score:', score + ')');
 }
 
+// --- DOM injection ---
 
-function replaceActiveRating(control) {
-  if (!control || control.style.display == 'none')
-  {
-    return;
-  }
-  
-  // Check if already modified
-  if (control.hasAttribute('stars')) {
-    console.log('[AOTY Stars] Already modified, skipping injection');
-    return;
-  }
-  
-  // Hide original UI
-  control.style.display = 'none';
-  control.setAttribute('stars', 'true');
-  
-  // Create and insert star widget
-  const starWidget = createStarWidget(0);
-  control.parentNode.insertBefore(starWidget, control.nextSibling);
-}
+// Read-only stars for any other rating block (e.g. other users' review ratings).
+function replaceRating(block) {
+  if (block.style.display === 'none') return; // already processed
 
-function replaceRating(block)
-{
-  const rating = block.querySelector('.rating');
+  const ratingEl = block.querySelector('.rating');
+  if (!ratingEl) return;
 
-  if (!rating) { // rating block doesn't contain a rating
-    console.log('No .rating found in:', block);
-    return;
-  }
+  const ratingText = block.parentElement?.querySelector('.ratingText')?.textContent.toLowerCase() ?? '';
+  if (ratingText.includes('critic') || ratingText.includes('user')) return;
 
-  const row = block.parentElement;
-  const text = row.querySelector('.ratingText');
-
-  if (text && 
-      (text.textContent.toLowerCase().includes('critic') || 
-      text.textContent.toLowerCase().includes('user'))) // returns on critic/user score blocks
-  {
-    return;
-  }
-
-  const score = parseInt(rating.textContent, 10);
+  const score = parseInt(ratingEl.textContent, 10);
+  if (!Number.isFinite(score)) return; // don't inject a broken widget
 
   block.style.display = 'none';
-  const starWidget = createStarWidgetReadOnly(scoreToStars(score));
-  block.parentNode.insertBefore(starWidget, block.nextSibling);
+  block.parentNode.insertBefore(createStarWidget(scoreToStars(score), true), block.nextSibling);
 }
 
-function replaceRatingBlock()
-{
-  document.querySelectorAll('.ratingBlock').forEach(block => {
-    replaceRating(block);
+function replaceRatingDistribution() {
+  document.querySelectorAll('#ratingDistribution .distLabel').forEach(label => {
+    const value = parseInt(label.textContent.trim(), 10);
+    if (!Number.isFinite(value)) return;
+    label.textContent = scoreToStars(value).toFixed(1) + '★';
   });
 }
 
-function replaceRatingDistribution()
-{
-  const labels = document.querySelectorAll('#ratingDistribution .distLabel');
-  if (!labels.length) { return; }
-  labels.forEach(label => {
-    const value = label.textContent.trim().split(' ', 1)[0];
-    label.textContent = scoreToStars(parseInt(value, 10)).toFixed(1) + "★";
-  });
+function syncOwnRating() {
+  const block = document.querySelector('#ratingBlock');
+  const current = document.querySelector('#currentRatingBlock');
+  
+  const showForm = block && (block.style.display !== 'none' || !current);
+  const showSaved = current && current.style.display !== 'none';
+
+  const activeWidget = document.querySelector('.stars.rymify-active');
+  const ownWidget = document.querySelector('.stars.rymify-own');
+
+  if (showForm) {
+    ownWidget?.remove();
+    if (!activeWidget) {
+      const input = block.querySelector('.ratingTextBox');
+      const score = input ? parseInt(input.value, 10) : NaN;
+      currentRating = Number.isFinite(score) ? scoreToStars(score) : 0;
+
+      block.classList.add('rymify-hide');
+      const widget = createStarWidget(currentRating);
+      widget.classList.add('rymify-active');
+      block.parentNode.insertBefore(widget, block.nextSibling);
+    }
+    return;
+  }
+
+  activeWidget?.remove();
+  if (!showSaved) return;
+
+  const score = parseInt(current.querySelector('.rating')?.textContent ?? '', 10);
+  if (!Number.isFinite(score)) return;
+
+  if (ownWidget) {
+    renderStars(scoreToStars(score), ownWidget);
+  } else {
+    current.classList.add('rymify-hide');
+    const widget = createStarWidget(scoreToStars(score), true);
+    widget.classList.add('rymify-own');
+    current.parentNode.insertBefore(widget, current.nextSibling);
+  }
 }
 
 function setupLayout() {
-  replaceRatingBlock(); // Replaces all already-rated blocks with stars
-  replaceActiveRating(findRatingControl()); // Replaces the unrated area with stars
-  replaceRatingDistribution(); // Replaces the rating distribution labels with stars
+  document.querySelectorAll('.ratingBlock').forEach(block => {
+    if (block.id !== 'currentRatingBlock') replaceRating(block); // own block handled by syncOwnRating
+  });
+  syncOwnRating();
+  replaceRatingDistribution();
 }
 
-// The MutationObserver will watch for changes in the DOM to re-inject the star UI
-// Kept but not used because AOTY's page is pretty static and doesn't seem to load new content dynamically, but may be useful in the future 
-function setupMutationObserver() {
-  if (observer) { return; }
+// --- Event handling and observation ---
 
-  observer = new MutationObserver(() => {
-    document.querySelectorAll('.ratingBlock.yourOwn').forEach(el => {
-      el.remove();
-    });
-    document.querySelectorAll('#ratingBlock #updateValue').forEach(el => {
-      replaceActiveRating(el.parentElement);
-    });
-    // document.querySelectorAll('#ratingBlock .insertRating').forEach(el => {
-    //   const stars = document.querySelector('.stars[stars="true"]');
-    //   stars?.querySelectorAll('.star').forEach(star => {
-    //     star.className = 'star empty';
-    //   });
-    //   replaceActiveRating(el.parentElement);
-    // });
-  });
-  
-  observer.observe(document.body, { childList: true, subtree: true });  
+// AOTY rebuilds the rating markup on rate / edit / save / delete
+function setupMutationObserver() {
+  if (observer) return;
+  observer = new MutationObserver(syncOwnRating);
+  observer.observe(document.body, { childList: true, subtree: true });
   console.log('[RYMify] MutationObserver started');
 }
 
-function addListeners() { 
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.deleteRatingYes');
-    if (!btn) return;
-
-    const stars = document.querySelector('.stars[stars="true"]');
-    stars?.querySelectorAll('.star').forEach(star => {
-      star.className = 'star empty';
-    });
-
-    const button = document.querySelector('#ratingBlock .insertRating');
-    if (button) { replaceActiveRating(button); }
-  }, true);
-}
-
+// --- Init ---
 
 function init() {
-  console.log('[RYMify] Initializing extension...');
+  console.log('[RYMify] Initializing...');
   setupLayout();
   setupMutationObserver();
-  addListeners();
 }
 
-// Makes sure function runs no matter when in the loading process
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
