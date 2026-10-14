@@ -1,7 +1,4 @@
-let observer = null;
-let currentRating = 0;
-
-// --- Conversion ---
+// numerical stuffs
 
 function starsToScore(stars) {
   return Math.round(stars * 20);
@@ -11,46 +8,53 @@ function scoreToStars(score) {
   return score / 20;
 }
 
-// --- Star widget ---
+function starStates(value) {
+  let v = Number(value);
+  if (!Number.isFinite(v)) v = 0;
+  v = Math.round(Math.max(0, Math.min(5, v)) * 2) / 2;
+  return [1, 2, 3, 4, 5].map(n => n <= v ? 'full' : n - 0.5 === v ? 'half' : 'empty');
+}
 
-function createStarWidget(initialStars, readOnly = false) {
+function scoreLabel(score) {
+  return Number.isFinite(score) && score % 10 !== 0 ? `(${score})` : '';
+}
+
+// stars
+
+function createStarWidget(score, onPick) {
   const widget = document.createElement('div');
   widget.className = 'stars';
-  widget.setAttribute('stars', 'true');
 
   for (let i = 0; i < 5; i++) {
     const star = document.createElement('span');
-    star.className = readOnly ? 'star-read-only' : 'star';
+    star.className = onPick ? 'star' : 'star-read-only';
     star.textContent = '★';
     widget.appendChild(star);
   }
+  const label = document.createElement('span');
+  label.className = 'rymify-score';
+  widget.appendChild(label);
 
-  renderStars(initialStars, widget);
-  if (!readOnly) attachStarEventListeners(widget);
+  setScore(widget, score);
+  if (onPick) attachStarEventListeners(widget, score, onPick);
 
   return widget;
 }
 
-function renderStars(value, widget) {
-  // Guard against NaN / out-of-range so a bad parse never blanks the widget
-  let v = Number(value);
-  if (!Number.isFinite(v)) v = 0;
-  v = Math.max(0, Math.min(5, v));
+function setScore(widget, score) {
+  renderStars(scoreToStars(score), widget);
+  widget.querySelector('.rymify-score').textContent = scoreLabel(score);
+}
 
-  const stars = widget.querySelectorAll('.star, .star-read-only');
-  const full = Math.floor(v);
-  const hasHalf = v % 1 !== 0;
-
-  stars.forEach((star, i) => {
-    const n = i + 1;
+function renderStars(stars, widget) {
+  const states = starStates(stars);
+  widget.querySelectorAll('.star, .star-read-only').forEach((star, i) => {
     star.classList.remove('full', 'half', 'empty');
-    if (n <= full) star.classList.add('full');
-    else if (n === full + 1 && hasHalf) star.classList.add('half');
-    else star.classList.add('empty');
+    star.classList.add(states[i]);
   });
 }
 
-function ratingFromEvent(e, widget) {
+function starsFromEvent(e, widget) {
   const star = e.target.closest('.star');
   if (!star) return null;
   const idx = Array.from(widget.querySelectorAll('.star')).indexOf(star) + 1;
@@ -58,138 +62,195 @@ function ratingFromEvent(e, widget) {
   return (e.clientX - rect.left) < rect.width / 2 ? idx - 0.5 : idx;
 }
 
-function attachStarEventListeners(widget) {
+function attachStarEventListeners(widget, score, onPick) {
   widget.addEventListener('click', (e) => {
-    const rating = ratingFromEvent(e, widget);
-    if (rating === null) return;
-    currentRating = rating;
-    renderStars(currentRating, widget);
-    submitRating(currentRating);
+    const stars = starsFromEvent(e, widget);
+    if (stars === null) return;
+    score = starsToScore(stars);
+    setScore(widget, score);
+    widget.classList.add('rymify-pending');
+    onPick(score);
   });
 
   widget.addEventListener('mousemove', (e) => {
-    const rating = ratingFromEvent(e, widget);
-    renderStars(rating ?? currentRating, widget);
+    renderStars(starsFromEvent(e, widget) ?? scoreToStars(score), widget);
   });
 
   widget.addEventListener('mouseleave', () => {
-    renderStars(currentRating, widget);
+    renderStars(scoreToStars(score), widget);
   });
 }
 
-// --- Rating submission ---
+async function post(url, data) {
+  const res = await fetch(url, { method: 'POST', body: new URLSearchParams(data) });
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  return res.text();
+}
 
-function submitRating(stars) {
+// ALBUM RATING
+
+function submitRating(score) {
   const input = document.querySelector('.ratingTextBox');
   if (!input) {
-    console.warn('[RYMify] Rating input not found; cannot submit');
+    insertRating(score);
     return;
   }
-
-  const score = starsToScore(stars);
   input.value = score;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
   document.querySelector('.insertRating, .updateRating')?.click();
-  console.log('[RYMify] Submitted rating:', stars, 'stars (score:', score + ')');
 }
 
-// --- DOM injection ---
-
-// Read-only stars for any other rating block (e.g. other users' review ratings).
-function replaceRating(block) {
-  if (block.style.display === 'none') return; // already processed
-
-  const ratingEl = block.querySelector('.rating');
-  if (!ratingEl) return;
-
-  const ratingText = block.parentElement?.querySelector('.ratingText')?.textContent.toLowerCase() ?? '';
-  if (ratingText.includes('critic') || ratingText.includes('user')) return;
-
-  const score = parseInt(ratingEl.textContent, 10);
-  if (!Number.isFinite(score)) return; // don't inject a broken widget
-
-  block.style.display = 'none';
-  block.parentNode.insertBefore(createStarWidget(scoreToStars(score), true), block.nextSibling);
-}
-
-function replaceRatingDistribution() {
-  document.querySelectorAll('#ratingDistribution .distLabel').forEach(label => {
-    const value = parseInt(label.textContent.trim(), 10);
-    if (!Number.isFinite(value)) return;
-    label.textContent = scoreToStars(value).toFixed(1) + '★';
-  });
+async function insertRating(score) {
+  const current = document.querySelector('#currentRatingBlock');
+  try {
+    const albumID = location.pathname.match(/\/album\/(\d+)/)[1];
+    const html = await post('/scripts/insertRatingLarge.php', { albumID, value: score });
+    const saved = new DOMParser().parseFromString(html, 'text/html').querySelector('.yourOwn');
+    current.innerHTML = saved.innerHTML;
+    current.style.display = '';
+  } catch (err) {
+    console.warn('[RYMify] Could not submit rating:', err);
+    document.querySelector('.stars.rymify-pending')?.classList.remove('rymify-pending');
+  }
 }
 
 function syncOwnRating() {
   const block = document.querySelector('#ratingBlock');
   const current = document.querySelector('#currentRatingBlock');
-  
-  const showForm = block && (block.style.display !== 'none' || !current);
-  const showSaved = current && current.style.display !== 'none';
+
+  const form = block?.querySelector('.ratingTextBox') && (block.style.display !== 'none' || !current) ? block : null;
+  const saved = [current, block?.querySelector('.yourOwn')].find(el => el && el.style.display !== 'none');
+  const showForm = form || (!saved && current?.style.display === 'none');
 
   const activeWidget = document.querySelector('.stars.rymify-active');
   const ownWidget = document.querySelector('.stars.rymify-own');
 
   if (showForm) {
     ownWidget?.remove();
+    form?.classList.add('rymify-hide');
     if (!activeWidget) {
-      const input = block.querySelector('.ratingTextBox');
-      const score = input ? parseInt(input.value, 10) : NaN;
-      currentRating = Number.isFinite(score) ? scoreToStars(score) : 0;
-
-      block.classList.add('rymify-hide');
-      const widget = createStarWidget(currentRating);
+      const anchor = form ?? current;
+      const widget = createStarWidget(parseInt(form?.querySelector('.ratingTextBox').value, 10), submitRating);
       widget.classList.add('rymify-active');
-      block.parentNode.insertBefore(widget, block.nextSibling);
+      anchor.after(widget);
     }
     return;
   }
 
   activeWidget?.remove();
-  if (!showSaved) return;
+  block?.classList.remove('rymify-hide');
+  const score = parseInt(saved?.querySelector('.rating')?.textContent, 10);
+  if (!Number.isFinite(score)) {
+    ownWidget?.remove();
+    return;
+  }
 
-  const score = parseInt(current.querySelector('.rating')?.textContent ?? '', 10);
-  if (!Number.isFinite(score)) return;
-
-  if (ownWidget) {
-    renderStars(scoreToStars(score), ownWidget);
+  saved.classList.add('rymify-hide');
+  if (ownWidget?.previousElementSibling === saved) {
+    setScore(ownWidget, score);
   } else {
-    current.classList.add('rymify-hide');
-    const widget = createStarWidget(scoreToStars(score), true);
+    ownWidget?.remove();
+    const widget = createStarWidget(score);
     widget.classList.add('rymify-own');
-    current.parentNode.insertBefore(widget, current.nextSibling);
+    saved.after(widget);
   }
 }
 
+// TRACK RATINGS
+
+function trackState(input) {
+  return {
+    score: input.dataset.rymifyScore ?? input.value,
+    prevScore: input.dataset.rymifyPrev ?? input.dataset.prevValue ?? '',
+    ratingID: input.dataset.rymifyRatingId ?? input.dataset.ratingId ?? '',
+  };
+}
+
+async function saveTrack(input, value) {
+  const { prevScore, ratingID } = trackState(input);
+  try {
+    await post('/scripts/insertSongRating.php', { songID: input.dataset.songId, value, prevScore, ratingID });
+
+    const btn = document.querySelector('.rateTracks');
+    const panel = await post('/scripts/rateTracks.php', { albumID: btn.dataset.albumId, songID: btn.dataset.songId ?? '' });
+    const fresh = new DOMParser().parseFromString(panel, 'text/html').getElementById(input.id);
+    input.dataset.rymifyScore = fresh.value;
+    input.dataset.rymifyPrev = fresh.dataset.prevValue ?? '';
+    input.dataset.rymifyRatingId = fresh.dataset.ratingId ?? '';
+
+    const msg = document.getElementById(`track_${input.dataset.songId}_msg`);
+    msg.textContent = 'Updated';
+    msg.style.cssText = 'color: green; display: block;';
+  } catch (err) {
+    console.warn('[RYMify] Could not save track rating:', err);
+  }
+  input.parentNode.querySelectorAll('.stars, .rymify-clear').forEach(el => el.remove());
+  syncTrackRatings();
+}
+
+function syncTrackRatings() {
+  document.querySelector('#rateTracklist')?.parentNode.querySelector('.insertTrackRatings')?.classList.add('rymify-hide');
+
+  document.querySelectorAll('#rateTracklist .trackRating input').forEach(input => {
+    if (input.parentNode.querySelector('.stars')) return;
+
+    const { score, ratingID } = trackState(input);
+    input.classList.add('rymify-hide');
+    const stars = createStarWidget(parseInt(score, 10), s => saveTrack(input, s));
+    input.after(stars);
+
+    const clear = document.createElement('button');
+    clear.className = ratingID ? 'rymify-clear' : 'rymify-clear rymify-invisible';
+    clear.title = 'Remove rating';
+    clear.textContent = '×';
+    clear.addEventListener('click', () => {
+      stars.classList.add('rymify-pending');
+      clear.disabled = true;
+      saveTrack(input, '');
+    });
+    stars.after(clear);
+  });
+}
+
+// NON-USER RATINGS 
+
+function replaceRating(block) {
+  if (block.classList.contains('rymify-hide') || block.style.display === 'none') return; // processed/hidden 
+
+  const ratingText = block.parentElement?.querySelector('.ratingText')?.textContent.toLowerCase() ?? '';
+  if (ratingText.includes('critic') || ratingText.includes('user')) return;
+
+  const score = parseInt(block.querySelector('.rating')?.textContent, 10);
+  if (!Number.isFinite(score)) return;
+
+  block.classList.add('rymify-hide');
+  block.after(createStarWidget(score));
+}
+
+function replaceRatingDistribution() {
+  document.querySelectorAll('#ratingDistribution .distLabel').forEach(label => {
+    if (label.textContent.includes('★')) return; // already converted
+    const score = parseInt(label.textContent, 10);
+    if (!Number.isFinite(score)) return;
+    label.textContent = scoreToStars(score).toFixed(1) + '★';
+  });
+}
+
+// INIT 
+
 function setupLayout() {
   document.querySelectorAll('.ratingBlock').forEach(block => {
-    if (block.id !== 'currentRatingBlock') replaceRating(block); // own block handled by syncOwnRating
+    if (block.id !== 'currentRatingBlock' && !block.closest('#ratingBlock')) replaceRating(block);
   });
   syncOwnRating();
+  syncTrackRatings();
   replaceRatingDistribution();
 }
 
-// --- Event handling and observation ---
-
-// AOTY rebuilds the rating markup on rate / edit / save / delete
-function setupMutationObserver() {
-  if (observer) return;
-  observer = new MutationObserver(syncOwnRating);
-  observer.observe(document.body, { childList: true, subtree: true });
-  console.log('[RYMify] MutationObserver started');
-}
-
-// --- Init ---
-
-function init() {
-  console.log('[RYMify] Initializing...');
+if (typeof document !== 'undefined') {
   setupLayout();
-  setupMutationObserver();
+  new MutationObserver(setupLayout).observe(document.body, {
+    childList: true, subtree: true, attributes: true, attributeFilter: ['style'],
+  });
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+if (typeof module !== 'undefined') module.exports = { starStates, starsToScore, scoreToStars, scoreLabel };

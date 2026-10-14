@@ -1,20 +1,15 @@
-/* Native AOTY rating controls we replace with a star widget. Uses a class
-   (not inline style) so AOTY's own display value stays readable as a state
-   signal. */
+
 .rymify-hide {
   display: none !important;
 }
 
-/* Star container */
 .stars {
   display: flex;
   gap: 2px;
   align-items: center;
   user-select: none;
-  padding: 0;
 }
 
-/* Interactive star */
 .stars .star {
   font-size: 24px;
   cursor: pointer;
@@ -23,7 +18,10 @@
   line-height: 1;
 }
 
-/* Read-only star */
+.stars .star:hover {
+  filter: brightness(1.2);
+}
+
 .stars .star-read-only {
   font-size: 16px;
   cursor: default;
@@ -33,29 +31,62 @@
   line-height: 1;
 }
 
-/* Full star state */
-.stars .star.full,
-.stars .star-read-only.full {
+.stars .full {
   color: #e9b416;
   text-shadow: 0 0 2px rgba(230, 193, 82, 0.5);
 }
 
-/* Half star state */
-.stars .star.half,
-.stars .star-read-only.half {
+.stars .half {
   background: linear-gradient(90deg, #e9b416 50%, #ccc 50%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Empty star state */
-.stars .star:not(.full):not(.half),
-.stars .star-read-only:not(.full):not(.half) {
-  color: #ccc;
+.stars .rymify-score {
+  color: #888;
+  font-size: 12px;
+  margin-left: 4px;
 }
 
-/* Hover effect for interactive stars */
-.stars .star:hover {
-  filter: brightness(1.2);
+.stars .rymify-score:empty {
+  display: none;
+}
+
+.stars.rymify-pending {
+  pointer-events: none;
+}
+
+#rateTracklist .trackRating {
+  white-space: nowrap;
+}
+
+#rateTracklist .trackRating .stars {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+#rateTracklist .stars .rymify-score {
+  order: -1;
+  margin: 0 4px 0 0;
+}
+
+.rymify-clear {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  margin-left: 6px;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.rymify-clear:hover {
+  color: #e05050;
+}
+
+.rymify-clear.rymify-invisible {
+  visibility: hidden;
 }
